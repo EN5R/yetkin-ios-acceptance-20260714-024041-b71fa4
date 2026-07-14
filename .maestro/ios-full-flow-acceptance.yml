@@ -1,0 +1,204 @@
+appId: codes.ensaar.yetkin
+name: iOS full two-user acceptance
+tags:
+  - ios
+  - acceptance
+  - full-flow
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      all: deny
+      location: inuse
+
+- setLocation:
+    latitude: ${MAESTRO_E2E_LATITUDE}
+    longitude: ${MAESTRO_E2E_LONGITUDE}
+
+- extendedWaitUntil:
+    visible: "Giriş yap"
+    timeout: 60000
+
+# Fingerprint OTA checks use a zero native launch wait. Keep the clean first
+# launch alive long enough to download its matching update, then restart so
+# credentials are never entered into a superseded embedded bundle.
+- tapOn:
+    point: "50%,20%"
+    repeat: 3
+    delay: 30000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Giriş yap"
+    timeout: 60000
+- assertVisible: "YETKIN_ACCEPTANCE_UPDATE_${MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID}_RUNTIME_${MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION}"
+
+- tapOn:
+    text: "Giriş yap"
+    enabled: true
+- extendedWaitUntil:
+    visible: "E-posta adresi giriş alanı"
+    timeout: 30000
+- tapOn: "E-posta adresi giriş alanı"
+- inputText: ${MAESTRO_E2E_EMAIL_A}
+- tapOn: "Şifre giriş alanı"
+- inputText: ${MAESTRO_E2E_PASSWORD_A}
+- hideKeyboard
+- tapOn:
+    text: "Giriş yap"
+    enabled: true
+
+- extendedWaitUntil:
+    visible: 'Save Password\?|Parola Kaydedilsin mi\?|Merhaba, .*'
+    timeout: 180000
+- tapOn:
+    text: 'Not Now|Şimdi Değil'
+    optional: true
+- extendedWaitUntil:
+    visible: "Merhaba, ${MAESTRO_E2E_FIRST_NAME_A}!"
+    timeout: 30000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/01-user-a-home
+
+# A real process restart must restore the authenticated owner-scoped session.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Merhaba, ${MAESTRO_E2E_FIRST_NAME_A}!"
+    timeout: 60000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/02-user-a-session-restored
+
+- tapOn: "Görevlerim.*"
+- extendedWaitUntil:
+    visible: "${MAESTRO_E2E_ASSIGNMENT_TEXT_A}"
+    timeout: 60000
+- assertVisible: "Kabul Edildi"
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/03-user-a-assignment
+
+- tapOn: "Harita.*"
+- extendedWaitUntil:
+    visible: "Görev ve rota haritası"
+    timeout: 60000
+- assertVisible: "Haritayı yenile"
+- extendedWaitUntil:
+    visible: "Navigasyonu başlat"
+    timeout: 180000
+- assertVisible: "Varış Noktası"
+- assertVisible: "En hızlı rota, .*"
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/04-user-a-route-preview
+
+- tapOn:
+    text: "Navigasyonu başlat"
+    enabled: true
+- extendedWaitUntil:
+    visible: "Navigasyonu bitir"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/05-user-a-navigation
+- swipe:
+    start: 65%, 40%
+    end: 30%, 40%
+    duration: 700
+- extendedWaitUntil:
+    visible: "Konumuma dön"
+    timeout: 15000
+- assertVisible: "Navigasyonu bitir"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/06-user-a-navigation-free-look
+- tapOn: "Konumuma dön"
+- assertNotVisible: "Konumuma dön"
+- assertVisible: "Navigasyonu bitir"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/07-user-a-navigation-follow-restored
+- tapOn:
+    text: "Navigasyonu bitir"
+    enabled: true
+- extendedWaitUntil:
+    visible: "Navigasyonu başlat"
+    timeout: 30000
+- tapOn:
+    text: "Navigasyonu başlat"
+    enabled: true
+- extendedWaitUntil:
+    visible: "Navigasyonu bitir"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/08-user-a-navigation-second-start
+- tapOn:
+    text: "Navigasyonu bitir"
+    enabled: true
+- extendedWaitUntil:
+    visible: "Navigasyonu başlat"
+    timeout: 30000
+- tapOn:
+    text: "Önizlemeyi kapat"
+    enabled: true
+- extendedWaitUntil:
+    notVisible: "Navigasyonu başlat"
+    timeout: 15000
+
+- tapOn: "Profilim.*"
+- extendedWaitUntil:
+    visible: "${MAESTRO_E2E_FIRST_NAME_A} .*"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      text: "Çıkış Yap"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Çıkış yap"
+- tapOn:
+    text: 'Tamam|OK'
+    optional: true
+- extendedWaitUntil:
+    visible: "E-posta adresi giriş alanı"
+    timeout: 60000
+
+# Logging in as B after A's logout is the cache/queue/map isolation boundary.
+- tapOn: "E-posta adresi giriş alanı"
+- inputText: ${MAESTRO_E2E_EMAIL_B}
+- tapOn: "Şifre giriş alanı"
+- inputText: ${MAESTRO_E2E_PASSWORD_B}
+- hideKeyboard
+- tapOn:
+    text: "Giriş yap"
+    enabled: true
+- extendedWaitUntil:
+    visible: 'Save Password\?|Parola Kaydedilsin mi\?|Merhaba, .*'
+    timeout: 180000
+- tapOn:
+    text: 'Not Now|Şimdi Değil'
+    optional: true
+- extendedWaitUntil:
+    visible: "Merhaba, ${MAESTRO_E2E_FIRST_NAME_B}!"
+    timeout: 30000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/09-user-b-home
+
+- tapOn: "Görevlerim.*"
+- extendedWaitUntil:
+    visible: ".*Görev Yok.*"
+    timeout: 60000
+- assertNotVisible: "${MAESTRO_E2E_ASSIGNMENT_TEXT_A}"
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/10-user-b-isolated
+
+- tapOn: "Profilim.*"
+- extendedWaitUntil:
+    visible: "${MAESTRO_E2E_FIRST_NAME_B} .*"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      text: "Çıkış Yap"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Çıkış yap"
+- tapOn:
+    text: 'Tamam|OK'
+    optional: true
+- extendedWaitUntil:
+    visible: "E-posta adresi giriş alanı"
+    timeout: 60000
+- takeScreenshot: ${MAESTRO_TESTS_DIR}/11-final-logged-out
