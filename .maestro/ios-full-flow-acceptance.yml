@@ -52,6 +52,13 @@ tags:
 - extendedWaitUntil:
     visible: 'Save Password\?|Parola Kaydedilsin mi\?|Merhaba, .*'
     timeout: 180000
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'Not Now|Şimdi Değil'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
     text: 'Not Now|Şimdi Değil'
     optional: true
@@ -172,6 +179,13 @@ tags:
 - extendedWaitUntil:
     visible: 'Save Password\?|Parola Kaydedilsin mi\?|Merhaba, .*'
     timeout: 180000
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'Not Now|Şimdi Değil'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
     text: 'Not Now|Şimdi Değil'
     optional: true
