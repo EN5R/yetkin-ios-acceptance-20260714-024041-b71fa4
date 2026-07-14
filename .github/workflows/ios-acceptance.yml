@@ -1,0 +1,198 @@
+name: Temporary YETKIN iOS Simulator Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios_acceptance:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate required secret-backed inputs
+        shell: bash
+        env:
+          IOS_BUILD_URL: ${{ secrets.IOS_BUILD_URL }}
+          EXPECTED_BUILD_ID: ${{ secrets.EXPECTED_BUILD_ID }}
+          EXPECTED_BUILD_ARCHIVE_SHA256: ${{ secrets.EXPECTED_BUILD_ARCHIVE_SHA256 }}
+          MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID: ${{ secrets.EXPECTED_UPDATE_ID }}
+          MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION: ${{ secrets.EXPECTED_RUNTIME_VERSION }}
+          MAESTRO_E2E_EMAIL_A: ${{ secrets.MAESTRO_E2E_EMAIL_A }}
+          MAESTRO_E2E_PASSWORD_A: ${{ secrets.MAESTRO_E2E_PASSWORD_A }}
+          MAESTRO_E2E_FIRST_NAME_A: ${{ secrets.MAESTRO_E2E_FIRST_NAME_A }}
+          MAESTRO_E2E_EMAIL_B: ${{ secrets.MAESTRO_E2E_EMAIL_B }}
+          MAESTRO_E2E_PASSWORD_B: ${{ secrets.MAESTRO_E2E_PASSWORD_B }}
+          MAESTRO_E2E_FIRST_NAME_B: ${{ secrets.MAESTRO_E2E_FIRST_NAME_B }}
+          MAESTRO_E2E_ASSIGNMENT_TEXT_A: ${{ secrets.MAESTRO_E2E_ASSIGNMENT_TEXT_A }}
+          MAESTRO_E2E_LATITUDE: ${{ secrets.MAESTRO_E2E_LATITUDE }}
+          MAESTRO_E2E_LONGITUDE: ${{ secrets.MAESTRO_E2E_LONGITUDE }}
+        run: |
+          set -euo pipefail
+          for name in \
+            IOS_BUILD_URL EXPECTED_BUILD_ID EXPECTED_BUILD_ARCHIVE_SHA256 \
+            MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID \
+            MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION \
+            MAESTRO_E2E_EMAIL_A MAESTRO_E2E_PASSWORD_A \
+            MAESTRO_E2E_FIRST_NAME_A MAESTRO_E2E_EMAIL_B \
+            MAESTRO_E2E_PASSWORD_B MAESTRO_E2E_FIRST_NAME_B \
+            MAESTRO_E2E_ASSIGNMENT_TEXT_A MAESTRO_E2E_LATITUDE \
+            MAESTRO_E2E_LONGITUDE; do
+            test -n "${!name:-}" || { echo "Missing required acceptance input" >&2; exit 1; }
+          done
+          [[ "$EXPECTED_BUILD_ID" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$EXPECTED_BUILD_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IOS_BUILD_URL" == https://expo.dev/artifacts/eas/*.tar.gz ]]
+
+      - name: Install pinned Maestro CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAESTRO_TEMP="${RUNNER_TEMP}/yetkin-maestro-2.3.0"
+          MAESTRO_ARCHIVE="$MAESTRO_TEMP/maestro.zip"
+          MAESTRO_EXTRACT="$MAESTRO_TEMP/extracted"
+          MAESTRO_INSTALL="$HOME/.yetkin-tools/maestro-2.3.0"
+          mkdir -p "$MAESTRO_TEMP" "$MAESTRO_EXTRACT" "$MAESTRO_INSTALL"
+          curl --fail --silent --show-error --location \
+            --output "$MAESTRO_ARCHIVE" \
+            https://github.com/mobile-dev-inc/Maestro/releases/download/cli-2.3.0/maestro.zip
+          printf '%s  %s\n' \
+            aaf524c6bcd456013855b1337464f964d9a65e2fb88861affea9b4c014644e50 \
+            "$MAESTRO_ARCHIVE" | shasum -a 256 --check
+          unzip -q "$MAESTRO_ARCHIVE" -d "$MAESTRO_EXTRACT"
+          cp -R "$MAESTRO_EXTRACT/maestro/." "$MAESTRO_INSTALL/"
+          "$MAESTRO_INSTALL/bin/maestro" --version
+
+      - name: Download exact EAS simulator build
+        shell: bash
+        env:
+          IOS_BUILD_URL: ${{ secrets.IOS_BUILD_URL }}
+          EXPECTED_BUILD_ARCHIVE_SHA256: ${{ secrets.EXPECTED_BUILD_ARCHIVE_SHA256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$RUNNER_TEMP/yetkin-ios-app"
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/yetkin-ios-build.tar.gz" \
+            "$IOS_BUILD_URL"
+          printf '%s  %s\n' \
+            "$EXPECTED_BUILD_ARCHIVE_SHA256" \
+            "$RUNNER_TEMP/yetkin-ios-build.tar.gz" \
+            | shasum -a 256 --check
+          printf '%s\n' "$EXPECTED_BUILD_ARCHIVE_SHA256" \
+            > artifacts/build-archive.sha256
+          tar -xzf "$RUNNER_TEMP/yetkin-ios-build.tar.gz" \
+            -C "$RUNNER_TEMP/yetkin-ios-app"
+          APP_PATH="$(find "$RUNNER_TEMP/yetkin-ios-app" -maxdepth 3 \
+            -type d -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          printf '%s' "$APP_PATH" > artifacts/app-path
+
+      - name: Boot simulator and install YETKIN
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE_JSON="$(
+            xcrun simctl list devices available --json \
+              | jq -cer '
+                  [
+                    .devices | to_entries[] as $runtime
+                    | $runtime.value[]
+                    | select(.isAvailable == true)
+                    | select(.name | startswith("iPhone"))
+                    | . + { runtime: $runtime.key }
+                  ]
+                  | sort_by(
+                      if .name == "iPhone 17 Pro Max" then 0
+                      elif (.name | contains("Pro Max")) then 1
+                      else 2
+                      end
+                    )
+                  | .[0]
+                '
+          )"
+          DEVICE_UDID="$(printf '%s' "$DEVICE_JSON" | jq -er .udid)"
+          printf '%s\n' "$DEVICE_JSON" > artifacts/simulator-device.json
+          printf '%s' "$DEVICE_UDID" > artifacts/simulator-udid
+          xcrun simctl boot "$DEVICE_UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_UDID" -b
+          xcrun simctl install "$DEVICE_UDID" "$(cat artifacts/app-path)"
+
+      - name: Run full two-user acceptance with recording
+        shell: bash
+        env:
+          EXPECTED_BUILD_ID: ${{ secrets.EXPECTED_BUILD_ID }}
+          EXPECTED_BUILD_ARCHIVE_SHA256: ${{ secrets.EXPECTED_BUILD_ARCHIVE_SHA256 }}
+          MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID: ${{ secrets.EXPECTED_UPDATE_ID }}
+          MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION: ${{ secrets.EXPECTED_RUNTIME_VERSION }}
+          MAESTRO_E2E_EMAIL_A: ${{ secrets.MAESTRO_E2E_EMAIL_A }}
+          MAESTRO_E2E_PASSWORD_A: ${{ secrets.MAESTRO_E2E_PASSWORD_A }}
+          MAESTRO_E2E_FIRST_NAME_A: ${{ secrets.MAESTRO_E2E_FIRST_NAME_A }}
+          MAESTRO_E2E_EMAIL_B: ${{ secrets.MAESTRO_E2E_EMAIL_B }}
+          MAESTRO_E2E_PASSWORD_B: ${{ secrets.MAESTRO_E2E_PASSWORD_B }}
+          MAESTRO_E2E_FIRST_NAME_B: ${{ secrets.MAESTRO_E2E_FIRST_NAME_B }}
+          MAESTRO_E2E_ASSIGNMENT_TEXT_A: ${{ secrets.MAESTRO_E2E_ASSIGNMENT_TEXT_A }}
+          MAESTRO_E2E_LATITUDE: ${{ secrets.MAESTRO_E2E_LATITUDE }}
+          MAESTRO_E2E_LONGITUDE: ${{ secrets.MAESTRO_E2E_LONGITUDE }}
+        run: |
+          set -euo pipefail
+          DEVICE_UDID="$(cat artifacts/simulator-udid)"
+          mkdir -p artifacts/screenshots
+          export MAESTRO_TESTS_DIR="$PWD/artifacts/screenshots"
+          jq -n \
+            --arg build_id "$EXPECTED_BUILD_ID" \
+            --arg build_archive_sha256 "$EXPECTED_BUILD_ARCHIVE_SHA256" \
+            --arg expected_update_id "$MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID" \
+            --arg expected_runtime_version "$MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION" \
+            '{
+              schema: "yetkin.mobile-acceptance-provenance/v1",
+              runner: "github-public-standard-macos-26",
+              platform: "ios",
+              build_id: $build_id,
+              build_archive_sha256: $build_archive_sha256,
+              expected_update_id: $expected_update_id,
+              expected_runtime_version: $expected_runtime_version
+            }' > artifacts/acceptance-provenance.json
+          xcrun simctl io "$DEVICE_UDID" recordVideo \
+            --codec=h264 artifacts/ios-simulator-acceptance.mp4 \
+            > artifacts/simctl-recording.log 2>&1 &
+          RECORDING_PID=$!
+          stop_recording() {
+            kill -INT "$RECORDING_PID" 2>/dev/null || true
+            wait "$RECORDING_PID" 2>/dev/null || true
+          }
+          trap stop_recording EXIT
+          "$HOME/.yetkin-tools/maestro-2.3.0/bin/maestro" \
+            --device "$DEVICE_UDID" \
+            test .maestro/ios-full-flow-acceptance.yml \
+            --format junit \
+            --output artifacts/maestro-junit.xml
+
+      - name: Shut down simulator
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if test -s artifacts/simulator-udid; then
+            xcrun simctl shutdown "$(cat artifacts/simulator-udid)" \
+              2>/dev/null || true
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ always() }}
+        with:
+          name: ios-final-source-acceptance-evidence
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            artifacts/maestro-junit.xml
+            artifacts/screenshots/**/*
+            artifacts/ios-simulator-acceptance.mp4
+            artifacts/simulator-device.json
+            artifacts/acceptance-provenance.json
+            artifacts/build-archive.sha256
