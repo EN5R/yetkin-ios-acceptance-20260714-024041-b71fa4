@@ -45,9 +45,9 @@ jobs:
             MAESTRO_E2E_LONGITUDE; do
             test -n "${!name:-}" || { echo "Missing required acceptance input" >&2; exit 1; }
           done
-          [[ "$EXPECTED_BUILD_ID" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$EXPECTED_BUILD_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
           [[ "$EXPECTED_BUILD_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$MAESTRO_E2E_EXPECTED_IOS_UPDATE_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
           [[ "$MAESTRO_E2E_EXPECTED_IOS_RUNTIME_VERSION" =~ ^[0-9a-f]{40}$ ]]
           [[ "$IOS_BUILD_URL" == https://expo.dev/artifacts/eas/*.tar.gz ]]
 
@@ -173,6 +173,39 @@ jobs:
             test .maestro/ios-full-flow-acceptance.yml \
             --format junit \
             --output artifacts/maestro-junit.xml
+
+      - name: Validate complete evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            artifacts/maestro-junit.xml \
+            artifacts/ios-simulator-acceptance.mp4 \
+            artifacts/simulator-device.json \
+            artifacts/acceptance-provenance.json \
+            artifacts/build-archive.sha256 \
+            artifacts/screenshots/01-user-a-home.png \
+            artifacts/screenshots/02-user-a-session-restored.png \
+            artifacts/screenshots/03-user-a-assignment.png \
+            artifacts/screenshots/04-user-a-route-preview.png \
+            artifacts/screenshots/05-user-a-navigation.png \
+            artifacts/screenshots/06-user-a-navigation-free-look.png \
+            artifacts/screenshots/07-user-a-navigation-follow-restored.png \
+            artifacts/screenshots/08-user-a-navigation-second-start.png \
+            artifacts/screenshots/09-user-b-home.png \
+            artifacts/screenshots/10-user-b-isolated.png \
+            artifacts/screenshots/11-final-logged-out.png; do
+            test -s "$path"
+          done
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("artifacts/maestro-junit.xml").getroot()
+          if not root.findall(".//testcase"):
+              raise SystemExit("acceptance JUnit contains no test case")
+          if root.findall(".//failure") or root.findall(".//error"):
+              raise SystemExit("acceptance JUnit contains a failure or error")
+          PY
 
       - name: Shut down simulator
         if: ${{ always() }}
